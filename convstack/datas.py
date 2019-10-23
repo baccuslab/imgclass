@@ -5,33 +5,42 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import torchvision
 
+# Prevents io error
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
 class Resize:
-    def __init__(self, height, width=None):
+    def __init__(self, height, width=None, depth=3):
         self.h = height
+        self.depth = depth
         if width is None:
             self.w = self.h
         else:
             self.w = width
     
-    def __call__(self, tup):
-        x,y = tup
-        return skimg.transform.resize(x,(self.h,self.w)), y
+    def __call__(self, sample):
+        x,y = sample['img'], sample['label']
+        if len(x.shape) == 2:
+            x = np.tile(x[...,None], (1,1,self.depth))
+        x = skimage.transform.resize(x,(self.h,self.w))
+        return {"img":x,"label":y}
 
 class Normalize:
     def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
+        self.mean = torch.FloatTensor(mean).squeeze()
+        self.std = torch.FloatTensor(std).squeeze() + 1e-5
 
-    def __call__(self, tup):
-        x,y = tup
-        x = (x-mean)/(std+1e-5)
-        return x,y
+    def __call__(self, sample):
+        x,y = sample['img'], sample['label']
+        x = (x-self.mean)/self.std
+        x = x.permute(2,0,1)
+        return {"img":x,"label":y}
 
 class ToTensor:
-    def __call__(self,tup):
-        x,y = tup
-        x = x.transpose((2,0,1))
-        return torch.from_numpy(x), torch.tensor([y]).long()
+    def __call__(self,sample):
+        x,y = sample['img'], sample['label']
+        x,y = torch.FloatTensor(x), torch.LongTensor([y])
+        return {"img":x,"label":y}
 
 class ImageFolder(Dataset):
     """
@@ -42,12 +51,13 @@ class ImageFolder(Dataset):
     WARNING: No folders other than class folders should be located within the 
             main folder.
     """
-    def __init__(self, main_path, transform=None, img_exts={}, img_size=224):
-        extensions = {".JPEG", ".png", ".jpeg", ".JPG", ".jpg"}|img_exts
+    def __init__(self, main_path, transform=None, img_size=224):
+        extensions = {".JPEG", ".png", ".jpeg", ".JPG", ".jpg"}
+        main_path = os.path.expanduser(main_path)
         self.main_path = main_path
 
         # Potentially create transform
-        if tranform is None:
+        if transform is None:
             self.transform = get_imgnet_transform(img_size)
         else:
             self.transform = transform
@@ -64,7 +74,7 @@ class ImageFolder(Dataset):
         self.n_labels = len(labels)
 
         # Collect images
-        img_paths = []
+        self.img_paths = []
         class_counts = dict()
         for folder in labels:
             path = os.path.join(main_path, folder)
@@ -73,7 +83,7 @@ class ImageFolder(Dataset):
             for f in files:
                 if f[-5:] in extensions or f[-4:] in extensions:
                     img_path = os.path.join(path,f)
-                    img_paths.append(img_path)
+                    self.img_paths.append(img_path)
                     n_imgs += 1
             class_counts[folder] = n_imgs
     
@@ -83,15 +93,32 @@ class ImageFolder(Dataset):
     def __getitem__(self,idx):
         if torch.is_tensor(idx):
             idx = idx.detach().cpu().to_list()
-        img_path = self.img_paths[idx]
-        x = skimg.io.imread(img_path)
-        label = img_path.split("/")[-1].split("_")[0]
+
+        # Try catch to prevent errors thrown from corrupted images
+        try:
+            img_path = self.img_paths[idx]
+            x = skimage.io.imread(img_path)
+            label = img_path.split("/")[-1].split("_")[0]
+        except:
+            fail = True
+            while fail:
+                try:
+                    idx += 1
+                    idx = idx % len(self.img_paths)
+                    img_path = self.img_paths[idx]
+                    x = skimage.io.imread(img_path)
+                    label = img_path.split("/")[-1].split("_")[idx]
+                    fail = False
+                except:
+                    fail = True
+
         y = self.label2idx[label]
+        sample = {"img":x, "label":y}
         
         if self.transform is not None:
-            x,y = self.transform((x,y))
+            sample = self.transform(sample)
 
-        return x,y
+        return sample
 
 def get_imgnet_transform(img_size=224, mean=None, std=None):
     """
@@ -102,7 +129,7 @@ def get_imgnet_transform(img_size=224, mean=None, std=None):
         mean = [0.485, 0.456, 0.406]
     if std is None:
         std=[0.229, 0.224, 0.225]
-    trans_fxns = [Resize(img_size),Normalize(mean=mean, std=std), ToTensor()]
+    trans_fxns = [Resize(img_size), ToTensor(), Normalize(mean=mean, std=std)]
     return torchvision.transforms.Compose(trans_fxns)
 
 class ImageList(Dataset):
@@ -123,7 +150,7 @@ class ImageList(Dataset):
         """
 
         # Potentially create transform
-        if tranform is None:
+        if transform is None:
             self.transform = get_imgnet_transform(img_size)
         else:
             self.transform = transform
@@ -133,24 +160,41 @@ class ImageList(Dataset):
         self.n_labels = len(idx2label)
 
         self.img_paths = img_paths
-    
+
     def __len__(self):
         return len(self.img_paths)
-    
+
     def __getitem__(self,idx):
         if torch.is_tensor(idx):
             idx = idx.detach().cpu().to_list()
-        img_path = self.img_paths[idx]
-        x = skimg.io.imread(img_path)
-        label = img_path.split("/")[-1].split("_")[0]
+
+        # Try catch to prevent errors thrown from corrupted images
+        try:
+            img_path = self.img_paths[idx]
+            x = skimage.io.imread(img_path)
+            label = img_path.split("/")[-1].split("_")[0]
+        except:
+            fail = True
+            while fail:
+                try:
+                    idx += 1
+                    idx = idx % len(self.img_paths)
+                    img_path = self.img_paths[idx]
+                    x = skimage.io.imread(img_path)
+                    label = img_path.split("/")[-1].split("_")[idx]
+                    fail = False
+                except:
+                    fail = True
+
         y = self.label2idx[label]
+        sample = {"img":x, "label":y}
         
         if self.transform is not None:
-            x,y = self.transform((x,y))
+            sample = self.transform(sample)
 
-        return x,y
+        return sample
 
-def train_val_split(main_path, val_p=0.1, val_loc='end', transform=None, img_exts={}):
+def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform=None):
     """
     Use this class to assist in seperating a train and validation dataset to be then used
     with a torch DataLoader
@@ -160,13 +204,15 @@ def train_val_split(main_path, val_p=0.1, val_loc='end', transform=None, img_ext
         the portion of validation samples
     val_loc: str ("beginning", "middle", "end")
         the location to collect validation images from in the array
+    img_size: int
+        both the height and width of the training images
     transform: pytorch Compsed transform or None
 
     Returns:
         TrainDataset: ImageList object
         ValDataset: ImageList object
     """
-    extensions = {".JPEG", ".png", ".jpeg", ".JPG", ".jpg"}|img_exts
+    extensions = {".JPEG", ".png", ".jpeg", ".JPG", ".jpg"}
     main_path = main_path
 
     # Collect classes/labels
@@ -211,8 +257,10 @@ def train_val_split(main_path, val_p=0.1, val_loc='end', transform=None, img_ext
             train_paths.extend(imgs[:-n_val])
             val_paths.extend(imgs[-n_val:])
 
-    train_dataset = ImageList(train_paths, idx2label=idx2label, label2idx=label2idx)
-    val_dataset = ImageList(val_paths, idx2label=idx2label, label2idx=label2idx)
+    train_dataset = ImageList(train_paths, idx2label=idx2label, label2idx=label2idx,
+                                                                  img_size=img_size)
+    val_dataset = ImageList(val_paths, idx2label=idx2label, label2idx=label2idx,
+                                                              img_size=img_size)
     return train_dataset, val_dataset, class_counts
 
 
