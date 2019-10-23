@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torchvision
-from torchdeepretina.torch_utils import *
-import torchdeepretina.utils as tdrutils
+from convstack.torch_utils import *
 import numpy as np
 from scipy import signal
 
@@ -34,7 +33,7 @@ class TDRModel(nn.Module):
         self.recurrent = recurrent
         self.kinetic = kinetic
         self.centers = centers
-        assert bnorm_d == 1 or bnorm_d == 2,
+        assert bnorm_d == 1 or bnorm_d == 2,\
                     "Only 1 and 2 dimensional batchnorm are currently supported"
         self.bnorm_d = bnorm_d
     
@@ -81,8 +80,8 @@ class AlexNet(TDRModel):
             if true, replaces convolutional layers with equivalent linearstacked convolutions
         """
         super().__init__(**kwargs)
-        alexnet = torchvision.models.AlexNet(pretrained=pretrained)
-        
+        alexnet = torchvision.models.alexnet(pretrained=pretrained)
+
         features = alexnet.features
         avgpool = alexnet.avgpool
         fc_layers = alexnet.classifier
@@ -124,7 +123,7 @@ class AlexNet(TDRModel):
             if isinstance(modu, nn.ReLU) and bnorm:
                 modules.append(nn.BatchNorm1d(flat_size,momentum=self.bn_moment))
         
-        self.sequential = nn.Sequential(**modules)
+        self.sequential = nn.Sequential(*modules)
 
     def forward(self, x):
         return self.sequential(x)
