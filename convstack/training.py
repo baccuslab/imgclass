@@ -50,7 +50,7 @@ def get_model(model_hyps):
         dict of relevant hyperparameters
     """
     model = model_hyps['model_class'](**model_hyps)
-    model = model.to(hyps['device'])
+    model = model.to(DEVICE)
     return model
 
 def get_optim_objs(hyps, model):
@@ -83,7 +83,6 @@ def train(hyps, model_hyps, verbose=False):
     """
     # Initialize miscellaneous parameters 
     torch.cuda.empty_cache()
-    hyps['device'] = DEVICE
     batch_size = hyps['batch_size']
 
     if 'skip_nums' in hyps and hyps['skip_nums'] is not None and\
@@ -97,7 +96,7 @@ def train(hyps, model_hyps, verbose=False):
         return results
 
     # Get Data and Data Distributers
-    datapath = hyps['datapath']
+    datapath = os.path.expanduser(hyps['datapath'])
     val_p = hyps['val_p']
     val_loc = hyps['val_loc']
     img_size = hyps['img_shape'][1]
@@ -106,18 +105,19 @@ def train(hyps, model_hyps, verbose=False):
     batch_size = hyps['batch_size']
     n_workers = hyps['n_workers']
     shuffle = hyps['shuffle']
+    val_bsize = 1000
     train_distr = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
                                             shuffle=shuffle, num_workers=n_workers)
-    val_distr = torch.utils.data.DataLoader(dataset, batch_size=1000, shuffle=False,
+    val_distr = torch.utils.data.DataLoader(val_data, batch_size=val_bsize, shuffle=False,
                                                               num_workers=n_workers)
 
-    model_hyps["n_units"] = train_distr.n_labels
+    model_hyps["n_units"] = train_data.n_labels
     model = get_model(model_hyps)
 
     record_session(model, hyps, model_hyps)
 
     # Make optimization objects (lossfxn, optimizer, scheduler)
-    optimizer, scheduler, loss_fxn = get_optim_objs(hyps, model, train_data.centers)
+    optimizer, scheduler, loss_fxn = get_optim_objs(hyps, model)
     if 'gauss_reg' in hyps and hyps['gauss_reg'] > 0:
         gauss_reg = utils.GaussRegularizer(model, [0,6], std=hyps['gauss_reg'])
 
@@ -129,22 +129,24 @@ def train(hyps, model_hyps, verbose=False):
         n_loops = int(n_loops) + int(n_loops==int(n_loops))
         model.train(mode=True)
         epoch_loss = 0
+        epoch_acc = 0
         stats_string = 'Epoch ' + str(epoch) + " -- " + hyps['save_folder'] + "\n"
         starttime = time.time()
 
         # Train Loop
-        for i,(x,y) in enumerate(train_distr):
+        for i,sample in enumerate(train_distr):
+            x,y = sample['img'], sample['label']
             optimizer.zero_grad()
 
-            y = y.long().to(DEVICE)
-            preds = model(x.to(DEVICE))
+            y = y.long().to(DEVICE).squeeze()
+            preds = model(x.to(DEVICE)).squeeze()
             loss = loss_fxn(preds, y)
             if 'gauss_reg' in hyps and hyps['gauss_reg'] > 0:
                 loss += hyps['gauss_loss_coef']*gauss_reg.get_loss()
             loss.backward()
             optimizer.step()
             argmaxes = torch.argmax(preds, dim=-1)
-            acc = (argmaxes==y).mean()
+            acc = (argmaxes.long()==y.long()).float().mean()
 
             epoch_loss += loss.item()
             epoch_acc += acc.item()
@@ -166,19 +168,22 @@ def train(hyps, model_hyps, verbose=False):
         model.eval()
         starttime = time.time()
         with torch.no_grad():
-            n_loops = len(val_distr)/step_size
+            n_loops = len(val_data)/val_bsize
             n_loops = int(n_loops) + int(n_loops==int(n_loops))
+            val_loss = 0
+            val_acc  = 0
             if verbose:
                 print()
                 print("Validating")
 
             # Val Loop
-            for i,(x,y) in enumerate(val_distr):
-                y = y.long().to(DEVICE)
-                preds = model(x.to(DEVICE))
+            for i,sample in enumerate(val_distr):
+                x,y = sample['img'], sample['label']
+                y = y.long().to(DEVICE).squeeze()
+                preds = model(x.to(DEVICE)).squeeze()
                 loss = loss_fxn(preds, y)
                 argmaxes = torch.argmax(preds, dim=-1)
-                acc = (argmaxes==y).mean()
+                acc = (argmaxes.long()==y.long()).float().mean()
 
                 val_loss += loss.item()
                 val_acc += acc.item()
@@ -186,6 +191,7 @@ def train(hyps, model_hyps, verbose=False):
                     print_train_update(loss, acc, n_loops, i)
                 if math.isnan(epoch_loss) or math.isinf(epoch_loss) or hyps['exp_name']=="test":
                     break
+            print()
             n_loops = i+1 # Just in case miscalculated
 
             # Validation Evaluation
@@ -219,7 +225,7 @@ def train(hyps, model_hyps, verbose=False):
         stats_string += "Memory Used: {:.2f} mb".format(max_mem_used / 1024)+"\n"
         print(stats_string)
         # If loss is nan, training is futile
-        if math.isnan(avg_loss) or math.isinf(avg_loss) or stop:
+        if math.isnan(avg_loss) or math.isinf(avg_loss) or hyps['exp_name']=="test":
             break
 
     # Final save
@@ -321,15 +327,13 @@ def hyper_search(hyps, hyp_ranges, keys, device, early_stopping=10, stop_toleran
     total_searches = hyper_q.qsize()
     print("n_searches:", total_searches)
 
-    trainer = Trainer(early_stopping=early_stopping, stop_tolerance=stop_tolerance)
-
     result_count = 0
     print("Starting Hyperloop")
     while not hyper_q.empty():
         print("Searches left:", hyper_q.qsize(),"-- Running Time:", time.time()-starttime)
+        print()
         hyperset = hyper_q.get()
-        hyperset.append(device)
-        results = trainer.train(*hyperset, verbose=True)
+        results = train(*hyperset, verbose=True)
         with open(results_file,'a') as f:
             results = " -- ".join([str(k)+":"+str(results[k]) for k in sorted(results.keys())])
             f.write("\n"+results+"\n")
