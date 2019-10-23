@@ -1,0 +1,24 @@
+{
+    "exp_name":"test",
+    "model_type":"AlexNet",
+    "stackconvs":true,
+    "shuffle":true,
+    "starting_exp_num":null,
+    "lossfxn":"CrossEntropyLoss",
+    "batch_size":5000,
+    "n_epochs":100,
+    "lr":0.001,
+    "l2":1e-3,
+    "bias":true,
+    "bnorm":true,
+    "locrespnorm":false,
+    "pretrained":false,
+    "drop_p":0.03,
+    "bnorm_momentum":0.01,
+    "stackchan":null,
+    "stackbnorm":false,
+    "img_shape":[3,224,224],
+    "one2one":false,
+    "skip_nums":[]
+}
+
