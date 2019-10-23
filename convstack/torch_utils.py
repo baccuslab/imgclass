@@ -20,12 +20,20 @@ def update_shape(shape, kernel=3, padding=0, stride=1, op="conv"):
     """
     if type(shape) == type(int()):
         shape = np.asarray([shape])
+    else:
+        shape = np.asarray(shape)
     if type(kernel) == type(int()):
         kernel = np.asarray([kernel for i in range(len(shape))])
+    else:
+        kernel = np.asarray(kernel)[:len(shape)]
     if type(padding) == type(int()):
         padding = np.asarray([padding for i in range(len(shape))])
+    else:
+        padding = np.asarray(padding)[:len(shape)]
     if type(stride) == type(int()):
         stride = np.asarray([stride for i in range(len(shape))])
+    else:
+        stride = np.asarray(stride)[:len(shape)]
 
     if op == "conv":
         shape = (shape - kernel + 2*padding)/stride + 1
