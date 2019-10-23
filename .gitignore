@@ -107,6 +107,7 @@ venv.bak/
 */checkpoints/
 *.pth
 *.p
+training_scripts/*/
 
 # Miscellaneous
 */hyperparams.txt
@@ -114,6 +115,7 @@ venv.bak/
 */hyperranges.json
 */description.txt
 */delete_me.py
+*/deleteme.py
 */*_results.txt
 */hyps/
 jupyter-notebooks/*.ipynb
