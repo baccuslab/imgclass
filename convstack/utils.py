@@ -585,7 +585,7 @@ def save_checkpoint(save_dict, folder, del_prev=False):
             torch.save(data, prev_path)
         elif save_dict['epoch'] != 0:
             print("Failed to find previous checkpoint", prev_path)
-    path = os.path.join(folder, exp_id + '_epoch_' + str(save_dict['epoch'])) + '.pt'
+    path = os.path.join(folder, 'epoch_' + str(save_dict['epoch'])) + '.pt'
     path = os.path.abspath(os.path.expanduser(path))
     torch.save(save_dict, path)
 
