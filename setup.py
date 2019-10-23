@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-import deepretina
+import convstack
 
 setup(name='convstack',
       version=convstack.__version__,
