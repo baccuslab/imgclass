@@ -68,8 +68,9 @@ def get_optim_objs(hyps, model):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor = 0.1)
     return optimizer, scheduler, loss_fxn
 
-def print_train_update(loss, acc, n_loops, i):
-    s = "Loss: {:.5e} | Acc: {:.5e} | {}/{}".format(loss.item(), acc.item(), i,n_loops)
+def print_train_update(loss, acc, n_loops, i, avg_time):
+    s = "Loss: {:.5e} | Acc: {:.5e} | {}/{} | s/iter: ".format(loss.item(), acc.item(), i,
+                                                                         n_loops,avg_time)
     print(s, end="       \r")
 
 def train(hyps, model_hyps, verbose=False):
@@ -123,8 +124,7 @@ def train(hyps, model_hyps, verbose=False):
 
     # Training
     for epoch in range(hyps['n_epochs']):
-        print("Beginning Epoch", epoch, " -- ", hyps['save_folder'])
-        print()
+        print("Epoch", epoch, " -- ", hyps['save_folder'])
         n_loops = len(train_data)/batch_size
         n_loops = int(n_loops) + int(n_loops==int(n_loops))
         model.train(mode=True)
@@ -135,6 +135,7 @@ def train(hyps, model_hyps, verbose=False):
 
         # Train Loop
         for i,sample in enumerate(train_distr):
+            iterstart = time.time()
             x,y = sample['img'], sample['label']
             optimizer.zero_grad()
 
