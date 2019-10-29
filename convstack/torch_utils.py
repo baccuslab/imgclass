@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import copy
 
 DEVICE = torch.device("cuda:0")
 
@@ -227,6 +228,73 @@ class GaussianNoise2d(nn.Module):
 
     def extra_repr(self):
         return 'n_chans={}, noise={}, momentum={}'.format(self.n_chans, self.noise, self.momentum)
+
+class ShakeShakeModule(nn.Module):
+    """
+    Employs the shake shake regularization described in Shake-Shake regularization 
+    (https://arxiv.org/abs/1705.07485)
+    """
+    def __init__(self, module, n_shakes=2):
+        super().__init__()
+        """
+        module: torch.nn.Module
+            The module should contain at least one Conv2d module
+        """
+        assert n_shakes > 1, 'Number of shakes must be greater than 1'
+        self.n_shakes = n_shakes
+        self.modu_list = nn.ModuleList([module])
+        for i in range(n_shakes-1):
+            new_module = copy.deepcopy(self.modu_list[-1])
+            for name,modu in new_module.named_modules():
+                if isinstance(modu, nn.Conv2d) or isinstance(modu, nn.Linear):
+                    nn.init.xavier_uniform(modu.weight)
+            self.modu_list.append(new_module)
+        self.alphas = nn.Parameter(torch.zeros(n_shakes),requires_grad=False)
+
+    def update_alphas(self, is_training, batch_size):
+        """
+        Updates the alphas to each be in range [0-1) and sum to about 1
+
+        is_training: bool
+            if true, alphas will be random values. If false, alphas will default to equal 
+            values (all summing to 1)
+        batch_size: int
+            number of samples in the batch
+        """
+        if is_training:
+            remainder = torch.ones(batch_size)
+            rands = torch.rand(batch_size, self.n_shakes)
+            if self.alphas.is_cuda:
+                self.alphas.data = torch.zeros(batch_size, self.n_shakes).to(DEVICE)
+                rands = rands.to(DEVICE)
+                remainder = remainder.to(DEVICE)
+            else:
+                self.alphas.data = torch.zeros(batch_size, self.n_shakes)
+
+            for i in range(self.n_shakes-1):
+                self.alphas.data[:,i] = rands[:,i]*remainder
+                remainder -= self.alphas.data[:,i]
+            self.alphas.data[:,-1] = remainder
+        else:
+            uniform = torch.ones(batch_size, self.n_shakes)/float(self.n_shakes)
+            if self.alphas.is_cuda:
+                uniform = uniform.to(DEVICE)
+            self.alphas.data = uniform
+        ones = torch.ones(batch_size)
+        if self.alphas.is_cuda:
+            ones = ones.to(DEVICE)
+        assert ((self.alphas.data.sum(-1)-ones)**2).mean() < 0.01
+
+    def forward(self, x):
+        self.update_alphas(is_training=self.train, batch_size=len(x))
+        fx = 0
+        einstring = "ij,i->ij" if len(x.shape) == 2 else "ijkl,i->ijkl"
+        for i in range(self.n_shakes):
+            output = self.modu_list[i](x)
+            output = torch.einsum(einstring, output, self.alphas[:,i])
+            fx += output
+        self.update_alphas(is_training=self.train, batch_size=len(x)) # Post update is used to randomize gradients
+        return fx
 
 class ScaleShift(nn.Module):
     def __init__(self, shape, scale=True, shift=True):
