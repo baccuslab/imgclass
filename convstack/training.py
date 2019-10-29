@@ -65,13 +65,33 @@ def get_optim_objs(hyps, model):
     else:
         loss_fxn = globals()[hyps['lossfxn']]()
     optimizer = torch.optim.Adam(model.parameters(), lr=hyps['lr'], weight_decay=hyps['l2'])
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor = 0.1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=hyps['n_epochs'],
+                                                                               eta_min=5e-5)
     return optimizer, scheduler, loss_fxn
 
 def print_train_update(loss, acc, n_loops, i, avg_time):
-    s = "Loss: {:.5e} | Acc: {:.5e} | {}/{} | s/iter: ".format(loss.item(), acc.item(), i,
+    s = "Loss: {:.5e} | Acc: {:.5e} | {}/{} | s/iter: {}".format(loss.item(), acc.item(), i,
                                                                          n_loops,avg_time)
     print(s, end="       \r")
+
+def get_data_distrs(hyps):
+    dataset = hyps['dataset']
+    val_p = hyps['val_p']
+    val_loc = hyps['val_loc']
+    img_size = hyps['img_shape'][1]
+    batch_size = hyps['batch_size']
+    n_workers = hyps['n_workers']
+    shuffle = hyps['shuffle']
+    val_bsize = 1000
+    train_data, val_data = datas.get_data_split(dataset, val_p=val_p)
+
+    train_distr = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
+                                            shuffle=shuffle, num_workers=n_workers)
+    val_distr = torch.utils.data.DataLoader(val_data, batch_size=val_bsize, shuffle=False,
+                                                              num_workers=n_workers)
+    n_labels = train_data.n_labels
+    return train_distr, val_distr, n_labels
+
 
 def train(hyps, model_hyps, verbose=False):
     """
@@ -97,22 +117,9 @@ def train(hyps, model_hyps, verbose=False):
         return results
 
     # Get Data and Data Distributers
-    datapath = os.path.expanduser(hyps['datapath'])
-    val_p = hyps['val_p']
-    val_loc = hyps['val_loc']
-    img_size = hyps['img_shape'][1]
-    train_data, val_data, label_distribution = datas.train_val_split(datapath, val_p=val_p,
-                                                         val_loc=val_loc,img_size=img_size)
-    batch_size = hyps['batch_size']
-    n_workers = hyps['n_workers']
-    shuffle = hyps['shuffle']
-    val_bsize = 1000
-    train_distr = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
-                                            shuffle=shuffle, num_workers=n_workers)
-    val_distr = torch.utils.data.DataLoader(val_data, batch_size=val_bsize, shuffle=False,
-                                                              num_workers=n_workers)
+    train_distr, val_distr, n_labels = get_data_distrs(hyps)
 
-    model_hyps["n_units"] = train_data.n_labels
+    model_hyps["n_units"] = n_labels
     model = get_model(model_hyps)
 
     record_session(model, hyps, model_hyps)
@@ -125,8 +132,7 @@ def train(hyps, model_hyps, verbose=False):
     # Training
     for epoch in range(hyps['n_epochs']):
         print("Epoch", epoch, " -- ", hyps['save_folder'])
-        n_loops = len(train_data)/batch_size
-        n_loops = int(n_loops) + int(n_loops==int(n_loops))
+        n_loops = len(train_distr)
         model.train(mode=True)
         epoch_loss = 0
         epoch_acc = 0
@@ -134,9 +140,8 @@ def train(hyps, model_hyps, verbose=False):
         starttime = time.time()
 
         # Train Loop
-        for i,sample in enumerate(train_distr):
+        for i,(x,y) in enumerate(train_distr):
             iterstart = time.time()
-            x,y = sample['img'], sample['label']
             optimizer.zero_grad()
 
             y = y.long().to(DEVICE).squeeze()
@@ -152,7 +157,7 @@ def train(hyps, model_hyps, verbose=False):
             epoch_loss += loss.item()
             epoch_acc += acc.item()
             if verbose:
-                print_train_update(loss, acc, n_loops, i)
+                print_train_update(loss, acc, n_loops, i, time.time()-iterstart)
             if math.isnan(epoch_loss) or math.isinf(epoch_loss) or hyps['exp_name']=="test":
                 break
         n_loops = i+1 # Just in case miscalculated
@@ -169,8 +174,7 @@ def train(hyps, model_hyps, verbose=False):
         model.eval()
         starttime = time.time()
         with torch.no_grad():
-            n_loops = len(val_data)/val_bsize
-            n_loops = int(n_loops) + int(n_loops==int(n_loops))
+            n_loops = len(val_distr)
             val_loss = 0
             val_acc  = 0
             if verbose:
@@ -178,8 +182,8 @@ def train(hyps, model_hyps, verbose=False):
                 print("Validating")
 
             # Val Loop
-            for i,sample in enumerate(val_distr):
-                x,y = sample['img'], sample['label']
+            for i,(x,y) in enumerate(val_distr):
+                iterstart = time.time()
                 y = y.long().to(DEVICE).squeeze()
                 preds = model(x.to(DEVICE)).squeeze()
                 loss = loss_fxn(preds, y)
@@ -189,7 +193,7 @@ def train(hyps, model_hyps, verbose=False):
                 val_loss += loss.item()
                 val_acc += acc.item()
                 if verbose:
-                    print_train_update(loss, acc, n_loops, i)
+                    print_train_update(loss, acc, n_loops, i, time.time()-iterstart)
                 if math.isnan(epoch_loss) or math.isinf(epoch_loss) or hyps['exp_name']=="test":
                     break
             print()
@@ -200,8 +204,8 @@ def train(hyps, model_hyps, verbose=False):
             val_acc = val_acc/n_loops
             stats_string += 'Val Loss: {} | Val Acc: {} | Time: {}\n'.format(val_loss, val_acc,
                                                                      time.time()-starttime)
-            scheduler.step(val_loss)
 
+        scheduler.step()
         # Save Model Snapshot
         optimizer.zero_grad()
         save_dict = {
