@@ -4,6 +4,8 @@ import skimage
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import torchvision
+import torchvision.transforms as vistrans
+import PIL
 
 # Prevents io error
 from PIL import ImageFile
@@ -120,7 +122,7 @@ class ImageFolder(Dataset):
 
         return sample
 
-def get_imgnet_transform(img_size=224, mean=None, std=None):
+def get_imgnet_transform(img_size=224, rot_degrees=20, mean=None, std=None):
     """
     Returns the pytorch Composed transform function used for imagenet data
     """
@@ -129,8 +131,13 @@ def get_imgnet_transform(img_size=224, mean=None, std=None):
         mean = [0.485, 0.456, 0.406]
     if std is None:
         std=[0.229, 0.224, 0.225]
-    trans_fxns = [Resize(img_size), ToTensor(), Normalize(mean=mean, std=std)]
-    return torchvision.transforms.Compose(trans_fxns)
+    trans_ops = [vistrans.Resize((img_size,img_size)), 
+                 vistrans.RandomHorizontalFlip(p=0.5), 
+                 vistrans.ColorJitter(hue=.05, saturation=.05),
+                 vistrans.RandomRotation(rot_degrees, resample=PIL.Image.BILINEAR),
+                 vistrans.ToTensor(),
+                 vistrans.Normalize(mean=mean, std=std)]
+    return vistrans.Compose(trans_ops)
 
 class ImageList(Dataset):
     """
@@ -194,12 +201,68 @@ class ImageList(Dataset):
 
         return sample
 
+def get_data_split(dataset, val_p=0.1, datapath=None):
+    """
+    Use this class to assist in getting the dataset to then be used with a torch DataLoader
+
+    dataset: str
+        imagenet, cifar10, cifar100
+    val_p: float
+        the portion of validation samples
+    val_loc: str ("beginning", "middle", "end")
+        the location to collect validation images from in the array
+    img_size: int
+        both the height and width of the training images
+    datapath: str
+        path to main folder of ImageFolder dataset
+
+    Returns:
+        TrainDataset: ImageList object
+        ValDataset: ImageList object
+    """
+    if dataset == "imagenet" or dataset == "imagefolder":
+        datapath = os.path.expanduser("~/imgnet") if datapath is None else datapath
+        val_loc='end'
+        img_size=224
+        train_data, val_data, label_distribution = datas.train_val_split(datapath, val_p=val_p,
+                                                         val_loc=val_loc,img_size=img_size)
+    else:
+        stats = (0.5, 0.5, 0.5)
+        trans_ops = [vistrans.RandomHorizontalFlip(p=0.5), 
+                     vistrans.ColorJitter(hue=.05, saturation=.05),
+                     vistrans.RandomRotation(20, resample=PIL.Image.BILINEAR),
+                     vistrans.ToTensor(),
+                     vistrans.Normalize(stats, stats)]
+        transform = vistrans.Compose(trans_ops)
+        if "cifar10" == dataset:
+            datapath = os.path.expanduser("~/cifar10") if datapath is None else datapath
+            train_data = torchvision.datasets.CIFAR10(datapath, train=True, transform=transform,
+                                                                                  download=True)
+            train_data.n_labels = 10
+            val_data = torchvision.datasets.CIFAR10(datapath,  train=False, transform=transform,
+                                                                                  download=True)
+            val_data.n_labels = 10
+        elif "cifar100" == dataset:
+            datapath = os.path.expanduser("~/cifar100") if datapath is None else datapath
+            train_data = torchvision.datasets.CIFAR100(datapath,train=True,transform=transform,
+                                                                                 download=True)
+            train_data.n_labels = 100
+            val_data = torchvision.datasets.CIFAR100(datapath, train=False,transform=transform,
+                                                                                 download=True)
+            val_data.n_labels = 100
+        else:
+            assert False, "Invalid dataset. Try imagenet, cifar10, or cifar100"
+    return train_data, val_data
+
+
 def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform=None):
     """
     Use this class to assist in seperating a train and validation dataset to be then used
     with a torch DataLoader
     Splits image folder data into a training and validation image folder
 
+    main_path: str
+        path to main data folder
     val_p: float
         the portion of validation samples
     val_loc: str ("beginning", "middle", "end")
@@ -213,7 +276,6 @@ def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform
         ValDataset: ImageList object
     """
     extensions = {".JPEG", ".png", ".jpeg", ".JPG", ".jpg"}
-    main_path = main_path
 
     # Collect classes/labels
     class_folders = os.listdir(main_path)
@@ -226,7 +288,8 @@ def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform
     idx2label = {i:label for i,label in enumerate(labels)}
     n_labels = len(labels)
 
-    # Collect and split images
+    # Collect and split images (takes a small portion of the images from each folder for the
+    # validation paths)
     train_paths = []
     val_paths = []
     class_counts = dict()
