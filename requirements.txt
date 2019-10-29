@@ -1,3 +1,4 @@
+convstack
 numpy
 scipy
 matplotlib
