@@ -23,7 +23,8 @@ class TDRModel(nn.Module):
                                                 strides=None, paddings=None,
                                                 bnorm=False, drop_p=0.03, 
                                                 stackchans=None, fc_drp=0,
-                                                n_shakes=1, **kwargs):
+                                                n_shakes=1, lin_shakes=None, 
+                                                batch_size=1000,**kwargs):
         super().__init__()
         self.n_units = n_units
         self.chans = chans 
@@ -40,15 +41,20 @@ class TDRModel(nn.Module):
         assert bnorm_d == 1 or bnorm_d == 2,\
                     "Only 1 and 2 dimensional batchnorm are currently supported"
         self.bnorm_d = bnorm_d
-        self.stackconvs = stackconvs
+        self.stackconvs = stackconvs if isinstance(stackconvs, list) else [stackconvs
+                                                                for x in self.ksizes]
         self.strides = strides if strides is not None else [1 for x in self.ksizes]
         self.paddings = paddings if paddings is not None else [0 for x in self.ksizes]
         assert len(self.strides) == len(self.ksizes) and len(self.paddings) == len(self.ksizes)
         self.stackchans = stackchans if stackchans is not None else [c for c in self.chans]
         self.bnorm = bnorm
-        self.drop_p = drop_p
+        self.drop_p = drop_p if isinstance(drop_p, list) else [drop_p for x in self.ksizes]
         self.fc_drp = fc_drp
         self.n_shakes = n_shakes
+        if lin_shakes is None:
+            lin_shakes = n_shakes
+        self.lin_shakes = lin_shakes
+        self.batch_size = batch_size
     
     def forward(self, x):
         return x
@@ -72,7 +78,7 @@ class TDRModel(nn.Module):
 
 class AlexNet(TDRModel):
     def __init__(self, pretrained=False, locrespnorm=False, stackbnorm=False,
-                                                          stackconvs=False, **kwargs):
+                                                                **kwargs):
         """
         This class recreates AlexNet from the paper "ImageNet Classification with Deep 
         Convolutional Neural Networks". It allows for easy manipulations.
@@ -115,7 +121,9 @@ class AlexNet(TDRModel):
                 shape = update_shape(shape, kernel=ksize, padding=padding, stride=stride)
                 self.shapes.append(shape)
                 self.chans.append(out_chans)
-                if stackconvs:
+                # TODO: fix stackconvs and drop_p
+                assert False , "Need to change stack convs to list"
+                if self.stackconvs:
                     bias = modu.bias is not None
                     modu = LinearStackedConv2d(in_chans, out_chans, ksize, bias=bias, 
                                                 drop_p=drop_p, padding=padding, stride=stride,
@@ -144,7 +152,7 @@ class AlexNet(TDRModel):
         return self.sequential(x)
 
 class SmallNet(TDRModel):
-    def __init__(self, stackbnorms=None, **kwargs):
+    def __init__(self, stackbnorms=None, mid_dims=128, **kwargs):
         super(SmallNet,self).__init__(**kwargs)
         self.shapes = []
         shape = self.img_shape[1:]
@@ -159,18 +167,20 @@ class SmallNet(TDRModel):
             ksize = self.ksizes[i]
             stride = self.strides[i]
             padding = self.paddings[i]
-            if self.stackconvs:
+            drop_p = self.drop_p[i]
+            if self.stackconvs[i]:
                 stack_chan = self.stackchans[i]
                 stackbnorm = self.stackbnorms[i]
                 modules.append(LinearStackedConv2d(in_chan, out_chan, stride=stride, 
                                                        kernel_size=ksize, padding=padding,
                                                        stack_chan=stack_chan, 
-                                                       drop_p=self.drop_p, bnorm=stackbnorm))
+                                                       drop_p=drop_p, bnorm=stackbnorm))
             else:
                 modules.append(nn.Conv2d(in_chan, out_chan,stride=stride, padding=padding,
                                                                         kernel_size=ksize))
             if self.n_shakes > 1:
-                modules[-1] = ShakeShakeModule(modules[-1], self.n_shakes)
+                modules[-1] = ShakeShakeModule(modules[-1], n_shakes=self.n_shakes, 
+                                                        batch_size=self.batch_size)
             shape = update_shape(shape, kernel=ksize, padding=padding, stride=stride)
             self.shapes.append(shape)
             modules.append(nn.ReLU())
@@ -179,16 +189,17 @@ class SmallNet(TDRModel):
 
         modules.append(Flatten())
         in_chan = out_chan*shape[0]*shape[1]
-        mid_chan = 128
-        modules.append(nn.Linear(in_chan,mid_chan))
-        if self.n_shakes > 1:
-            modules[-1] = ShakeShakeModule(modules[-1], self.n_shakes)
+        modules.append(nn.Linear(in_chan,mid_dims))
+        if self.lin_shakes > 1:
+            modules[-1] = ShakeShakeModule(modules[-1], n_shakes=self.lin_shakes, 
+                                                        batch_size=self.batch_size)
         if self.fc_drp > 0 and self.fc_drp < 1:
             modules.append(nn.Dropout(self.fc_drp))
         modules.append(nn.LeakyReLU())
-        modules.append(nn.Linear(mid_chan,self.n_units))
-        if self.n_shakes > 1:
-            modules[-1] = ShakeShakeModule(modules[-1], self.n_shakes)
+        modules.append(nn.Linear(mid_dims,self.n_units))
+        if self.lin_shakes > 1:
+            modules[-1] = ShakeShakeModule(modules[-1], n_shakes=self.lin_shakes, 
+                                                        batch_size=self.batch_size)
         self.sequential = nn.Sequential(*modules)
 
     def forward(self,x):
