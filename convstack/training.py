@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
+from torch.optim.lr_scheduler import *
 import torch.nn.functional as F
 import convstack.utils as utils
 import convstack.datas as datas
@@ -65,8 +66,11 @@ def get_optim_objs(hyps, model):
     else:
         loss_fxn = globals()[hyps['lossfxn']]()
     optimizer = torch.optim.Adam(model.parameters(), lr=hyps['lr'], weight_decay=hyps['l2'])
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=hyps['n_epochs'],
-                                                                               eta_min=5e-5)
+    if 'scheduler' in hyps and hyps['scheduler'] == "CosineAnnealingLR":
+        scheduler = globals()[hyps['scheduler']](optimizer, T_max=hyps['n_epochs'],
+                                                                         eta_min=5e-5)
+    else:
+        scheduler = ReduceLROnPlateau(optimizer, factor=0.5, patience=8)
     return optimizer, scheduler, loss_fxn
 
 def print_train_update(loss, acc, n_loops, i, avg_time):
@@ -205,7 +209,10 @@ def train(hyps, model_hyps, verbose=False):
             stats_string += 'Val Loss: {} | Val Acc: {} | Time: {}\n'.format(val_loss, val_acc,
                                                                      time.time()-starttime)
 
-        scheduler.step()
+        if 'scheduler' in hyps and hyps['scheduler'] == "CosineAnnealingLR":
+            scheduler.step()
+        elif 'scheduler' in hyps and hyps['scheduler'] == "ReduceLROnPlateau":
+            scheduler.step(val_loss)
         # Save Model Snapshot
         optimizer.zero_grad()
         save_dict = {
