@@ -95,6 +95,11 @@ def read_model_file(file_name):
     data = torch.load(file_name, map_location="cpu")
     model_type = data['model_type']
     model = globals()[model_type](**data['model_hyps'])
+    if "n_shakes" in data and data['n_shakes'] > 1:
+        sd = data['model_state_dict']
+        for name, param in model.named_parameters():
+            if "alpha" in name:
+                param.data = sd[name]
     model.load_state_dict(data['model_state_dict'])
     return model
 
@@ -132,6 +137,11 @@ def read_model(folder, ret_metrics=False):
 
     model_type = data['model_type']
     model = globals()[model_type](**data['model_hyps'])
+    if "n_shakes" in data and data['n_shakes'] > 1:
+        sd = data['model_state_dict']
+        for name, param in model.named_parameters():
+            if "alpha" in name:
+                param.data = sd[name]
     model.load_state_dict(data['model_state_dict'])
     if ret_metrics:
         return model, metrics
