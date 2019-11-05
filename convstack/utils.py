@@ -292,8 +292,8 @@ def compute_sta(model, contrast, layer, cell_index, layer_shape=None, batch_size
     layer
     """
     # generate some white noise
-    X = tdrstim.concat(tdrstim.white(n_samples, contrast=contrast))
-    #X = tdrstim.concat(contrast*np.random.randn(n_samples,50,50),nh=model.img_shape[0])
+    X = rolling_window(tdrstim.white(n_samples, contrast=contrast),model.img_shape[0])
+    #X = rolling_window(contrast*np.random.randn(n_samples,50,50),nh=model.img_shape[0])
     X = torch.FloatTensor(X)
     X.requires_grad = True
 
@@ -463,7 +463,7 @@ def revcor_sta(model, layer, cell_index, layer_shape=None, n_samples=15000, batc
         returns values as numpy arrays if true, else as torch tensors
     """
     noise = contrast*np.random.randn(n_samples,*model.img_shape[1:])
-    X = tdrstim.concat(noise, nh=model.img_shape[0])
+    X = rolling_window(noise, model.img_shape[0])
     with torch.no_grad():
         response = inspect(model, X, insp_keys=set([layer]), batch_size=batch_size, 
                                                                     to_numpy=False)
@@ -493,9 +493,9 @@ def revcor_sta_allchans(model, layers=['sequential.0','sequential.6'], chans=[8,
     """
     if type(layers) == type(str()):
         layers = [layers]
-    noise = np.random.randn(n_samples,50,50)
+    noise = np.random.randn(n_samples,*model.img_shape[1:])
     filter_size = model.img_shape[0]
-    X = tdrstim.concat(noise, nh=filter_size)
+    X = rolling_window(noise, filter_size)
     with torch.no_grad():
         response = inspect(model, X, insp_keys=set(layers), batch_size=batch_size,
                                                                     to_numpy=True)
