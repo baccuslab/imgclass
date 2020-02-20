@@ -1,0 +1,37 @@
+{
+    "exp_name":"plain1",
+    "n_repeats":3,
+    "seed":null,
+    "starting_exp_num":null,
+    "skip_nums":null,
+
+    "model_type":"PlainN",
+    "width":null,
+    "plain_n":1,
+    "n_shakes":2,
+    "locrespnorm":false,
+    "bnorm":true,
+    "stackconvs":false,
+    "img_shape":[3,32,32],
+    "drop_ps":null,
+    "ksizes":[5,5,5,5,5],
+    "chans":[64,128,256,256,256],
+    "strides":null,
+    "paddings":null,
+    "mid_dims":null,
+
+    "shuffle":true,
+    "lossfxn":"CrossEntropyLoss",
+    "batch_size":128,
+    "n_epochs":200,
+    "lr":0.0005,
+    "l2":1e-4,
+    "bn_moment":0.1,
+
+    "dataset":"cifar10",
+    "val_p":0.1,
+    "val_loc":"end",
+    "n_workers":4,
+    "scheduler":"ReduceLROnPlateau"
+}
+
