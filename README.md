@@ -1,2 +1,2 @@
-# linear-conv-stacking
-A collection of methods and classes to determine the benefits of linear convolutions
+# imgclass
+A collection of methods and classes to do image classification.
