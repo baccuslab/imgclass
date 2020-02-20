@@ -46,12 +46,12 @@ class ToTensor:
 
 class ImageFolder(Dataset):
     """
-    This class is used for image data that is structured by grouping images of
-    each class into a unique folder for that class. These class folders should
-    all be located in a single main folder. 
+    This class is used for image data that is structured by grouping
+    images of each class into a unique folder for that class. These
+    class folders should all be located in a single main folder. 
     
-    WARNING: No folders other than class folders should be located within the 
-            main folder.
+    WARNING: No folders other than class folders should be located
+            within the main folder.
     """
     def __init__(self, main_path, transform=None, img_size=224):
         extensions = {".JPEG", ".png", ".jpeg", ".JPG", ".jpg"}
@@ -122,9 +122,11 @@ class ImageFolder(Dataset):
 
         return sample
 
-def get_imgnet_transform(img_size=224, rot_degrees=20, mean=None, std=None):
+def get_imgnet_transform(img_size=224, rot_degrees=20, mean=None,
+                                                       std=None):
     """
-    Returns the pytorch Composed transform function used for imagenet data
+    Returns the pytorch Composed transform function used for imagenet
+    data
     """
     # Potentially create transform
     if mean is None:
@@ -134,16 +136,20 @@ def get_imgnet_transform(img_size=224, rot_degrees=20, mean=None, std=None):
     trans_ops = [vistrans.Resize((img_size,img_size)), 
                  vistrans.RandomHorizontalFlip(p=0.5), 
                  vistrans.ColorJitter(hue=.05, saturation=.05),
-                 vistrans.RandomRotation(rot_degrees, resample=PIL.Image.BILINEAR),
+                 vistrans.RandomRotation(rot_degrees,
+                                        resample=PIL.Image.BILINEAR),
                  vistrans.ToTensor(),
                  vistrans.Normalize(mean=mean, std=std)]
     return vistrans.Compose(trans_ops)
 
 class ImageList(Dataset):
     """
-    Similar to ImageFolder class, but can argue the list of image names directly
+    Similar to ImageFolder class, but can argue the list of image
+    names directly
     """
-    def __init__(self, img_paths, idx2label, label2idx, transform=None, img_size=224):
+    def __init__(self, img_paths, idx2label, label2idx,
+                                        transform=None,
+                                        img_size=224):
         """
         img_paths: list
             list of paths to images
@@ -203,7 +209,8 @@ class ImageList(Dataset):
 
 def get_data_split(dataset, val_p=0.1, datapath=None):
     """
-    Use this class to assist in getting the dataset to then be used with a torch DataLoader
+    Use this class to assist in getting the dataset to then be used
+    with a torch DataLoader
 
     dataset: str
         imagenet, cifar10, cifar100
@@ -221,45 +228,62 @@ def get_data_split(dataset, val_p=0.1, datapath=None):
         ValDataset: ImageList object
     """
     if dataset == "imagenet" or dataset == "imagefolder":
-        datapath = os.path.expanduser("~/imgnet") if datapath is None else datapath
+        datapath = os.path.expanduser("~/imgnet") if datapath is\
+                                                None else datapath
         val_loc='end'
         img_size=224
-        train_data, val_data, label_distribution = datas.train_val_split(datapath, val_p=val_p,
-                                                         val_loc=val_loc,img_size=img_size)
+        tup = datas.train_val_split(datapath, val_p=val_p,
+                                              val_loc=val_loc,
+                                              img_size=img_size)
+        train_data, val_data, label_distribution = tup
     else:
         stats = (0.5, 0.5, 0.5)
-        trans_ops = [vistrans.RandomHorizontalFlip(p=0.5), 
-                     vistrans.ColorJitter(hue=.05, saturation=.05),
-                     vistrans.RandomRotation(20, resample=PIL.Image.BILINEAR),
-                     vistrans.ToTensor(),
-                     vistrans.Normalize(stats, stats)]
+        trans_ops = [
+            vistrans.RandomHorizontalFlip(p=0.5), 
+            vistrans.ColorJitter(hue=.05, saturation=.05),
+            vistrans.RandomRotation(20, resample=PIL.Image.BILINEAR),
+            vistrans.ToTensor(),
+            vistrans.Normalize(stats, stats)
+        ]
         transform = vistrans.Compose(trans_ops)
         if "cifar10" == dataset:
-            datapath = os.path.expanduser("~/cifar10") if datapath is None else datapath
-            train_data = torchvision.datasets.CIFAR10(datapath, train=True, transform=transform,
-                                                                                  download=True)
+            datapath = os.path.expanduser("~/cifar10") if datapath is\
+                                                    None else datapath
+            train_data = torchvision.datasets.CIFAR10(datapath,
+                                                 train=True,
+                                                 transform=transform,
+                                                 download=True)
             train_data.n_labels = 10
-            val_data = torchvision.datasets.CIFAR10(datapath,  train=False, transform=transform,
-                                                                                  download=True)
+            val_data = torchvision.datasets.CIFAR10(datapath,
+                                                  train=False,
+                                                  transform=transform,
+                                                  download=True)
             val_data.n_labels = 10
         elif "cifar100" == dataset:
-            datapath = os.path.expanduser("~/cifar100") if datapath is None else datapath
-            train_data = torchvision.datasets.CIFAR100(datapath,train=True,transform=transform,
-                                                                                 download=True)
+            datapath = os.path.expanduser("~/cifar100") if datapath\
+                                                is None else datapath
+            train_data = torchvision.datasets.CIFAR100(datapath,
+                                                  train=True,
+                                                  transform=transform,
+                                                  download=True)
             train_data.n_labels = 100
-            val_data = torchvision.datasets.CIFAR100(datapath, train=False,transform=transform,
-                                                                                 download=True)
+            val_data = torchvision.datasets.CIFAR100(datapath,
+                                                 train=False,
+                                                 transform=transform,
+                                                 download=True)
             val_data.n_labels = 100
         else:
-            assert False, "Invalid dataset. Try imagenet, cifar10, or cifar100"
+            s = "Invalid dataset. Try imagenet, cifar10, or cifar100"
+            assert False, s
     return train_data, val_data
 
 
-def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform=None):
+def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224,
+                                                      transform=None):
     """
-    Use this class to assist in seperating a train and validation dataset to be then used
-    with a torch DataLoader
-    Splits image folder data into a training and validation image folder
+    Use this class to assist in seperating a train and validation
+    dataset to be then used with a torch DataLoader. Splits image
+    folder data into a training and validation image folder
 
     main_path: str
         path to main data folder
@@ -288,8 +312,8 @@ def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform
     idx2label = {i:label for i,label in enumerate(labels)}
     n_labels = len(labels)
 
-    # Collect and split images (takes a small portion of the images from each folder for the
-    # validation paths)
+    # Collect and split images (takes a small portion of the images
+    # from each folder for the validation paths)
     train_paths = []
     val_paths = []
     class_counts = dict()
@@ -320,10 +344,12 @@ def train_val_split(main_path, val_p=0.1, val_loc='end', img_size=224, transform
             train_paths.extend(imgs[:-n_val])
             val_paths.extend(imgs[-n_val:])
 
-    train_dataset = ImageList(train_paths, idx2label=idx2label, label2idx=label2idx,
-                                                                  img_size=img_size)
-    val_dataset = ImageList(val_paths, idx2label=idx2label, label2idx=label2idx,
-                                                              img_size=img_size)
+    train_dataset = ImageList(train_paths, idx2label=idx2label,
+                                           label2idx=label2idx,
+                                           img_size=img_size)
+    val_dataset = ImageList(val_paths, idx2label=idx2label,
+                                       label2idx=label2idx,
+                                       img_size=img_size)
     return train_dataset, val_dataset, class_counts
 
 

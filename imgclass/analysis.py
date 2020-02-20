@@ -1,8 +1,8 @@
 import sys
 import numpy as np
 import torch
-from convstack.models import *
-import convstack.utils as csutils
+from imgclass.models import *
+import imgclass.utils as utils
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -55,11 +55,11 @@ def extract_hypstxt(path):
                 hyps[splt[0]] = [int(x.strip()) for x in temp]
     return hyps
 
-def get_hyps(folder, main_dir="~/src/convstack/training_scripts"):
+def get_hyps(folder):
     try:
-        main_dir = os.path.expanduser(main_dir)
-        path = os.path.join(main_dir, folder, "hyperparams.json")
-        return csutils.load_json(path)
+        folder = os.path.expanduser(folder)
+        path = os.path.join(folder, "hyperparams.json")
+        return utils.load_json(path)
     except Exception as e:
         try:
             path = os.path.join(main_dir, folder)

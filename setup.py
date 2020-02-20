@@ -1,16 +1,15 @@
 from setuptools import setup, find_packages
-import convstack
 
-setup(name='convstack',
-      version=convstack.__version__,
-      description='Demonstration of linear convolutional stacking',
+setup(name='imgclass',
+      version="0.1.0",
+      description='Simple image classification',
       author='Satchel Grant',
       author_email='grantsrb@stanford.edu',
-      url='https://github.com/baccuslab/deep-retina.git',
+      url='https://github.com/baccuslab/imgclass.git',
       install_requires=[i.strip() for i in open("requirements.txt").readlines()],
       long_description='''
-          This package contains methods and model architectures used to demonstrate
-          the effectiveness of linear convolutional stacking.
+          This package contains methods, classes, and model
+          architectures used for simple image classificaion.
           ''',
       classifiers=[
           'Intended Audience :: Science/Research',

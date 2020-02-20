@@ -3,3 +3,4 @@ from .models import *
 from .datas import *
 from .utils import *
 from .analysis import *
+from .training import *

@@ -7,9 +7,9 @@ import torch.nn as nn
 from torch.nn import CrossEntropyLoss
 from torch.optim.lr_scheduler import *
 import torch.nn.functional as F
-import convstack.utils as utils
-import convstack.datas as datas
-from convstack.models import *
+import imgclass.utils as utils
+import imgclass.datas as datas
+from imgclass.models import *
 import time
 from tqdm import tqdm
 import math
@@ -18,39 +18,37 @@ import gc
 import resource
 import json
 
-DEVICE = torch.device("cuda:0")
+if torch.cuda.is_available():
+    DEVICE = torch.device("cuda:0")
+else:
+    DEVICE = torch.device('cpu')
 
-def record_session(model, hyps, model_hyps):
+def record_session(model, hyps):
     """
     model: torch nn.Module
         the model to be trained
     hyps: dict
         dict of relevant hyperparameters
-    model_hyps: dict
-        dict of relevant hyperparameters specific to creating the model architecture
     """
     if not os.path.exists(hyps['save_folder']):
         os.mkdir(hyps['save_folder'])
-    with open(os.path.join(hyps['save_folder'],"hyperparams.txt"),'w') as f:
+    path = os.path.join(hyps['save_folder'],"hyperparams.txt")
+    with open(path,'w') as f:
         f.write(str(model)+'\n')
         for k in sorted(hyps.keys()):
             f.write(str(k) + ": " + str(hyps[k]) + "\n")
-    with open(os.path.join(hyps['save_folder'],"hyperparams.json"),'w') as f:
+    path = os.path.join(hyps['save_folder'],"hyperparams.json")
+    with open(path,'w') as f:
         temp_hyps = {k:v for k,v in hyps.items()}
         del temp_hyps['model_class']
         json.dump(temp_hyps, f)
-    with open(os.path.join(hyps['save_folder'],"model_hyps.json"),'w') as f:
-        temp_hyps = {k:v for k,v in model_hyps.items()}
-        if 'model_class' in temp_hyps:
-            del temp_hyps['model_class']
-        json.dump(temp_hyps, f)
 
-def get_model(model_hyps):
+def get_model(hyps):
     """
-    model_hyps: dict
+    hyps: dict
         dict of relevant hyperparameters
     """
-    model = model_hyps['model_class'](**model_hyps)
+    model = hyps['model_class'](**hyps)
     model = model.to(DEVICE)
     return model
 
@@ -65,17 +63,21 @@ def get_optim_objs(hyps, model):
         hyps['lossfxn'] = "CrossEntropyLoss"
     else:
         loss_fxn = globals()[hyps['lossfxn']]()
-    optimizer = torch.optim.Adam(model.parameters(), lr=hyps['lr'], weight_decay=hyps['l2'])
-    if 'scheduler' in hyps and hyps['scheduler'] == "CosineAnnealingLR":
-        scheduler = globals()[hyps['scheduler']](optimizer, T_max=hyps['n_epochs'],
-                                                                         eta_min=5e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=hyps['lr'],
+                                            weight_decay=hyps['l2'])
+    b = 'scheduler' in hyps
+    b = b and hyps['scheduler'] == "CosineAnnealingLR"
+    if b:
+        scheduler = globals()[hyps['scheduler']](optimizer,
+                                            T_max=hyps['n_epochs'],
+                                            eta_min=5e-5)
     else:
         scheduler = ReduceLROnPlateau(optimizer, factor=0.5, patience=8)
     return optimizer, scheduler, loss_fxn
 
 def print_train_update(loss, acc, n_loops, i, avg_time):
-    s = "Loss: {:.5e} | Acc: {:.5e} | {}/{} | s/iter: {}".format(loss.item(), acc.item(), i,
-                                                                         n_loops,avg_time)
+    s = "Loss: {:.5e} | Acc: {:.5e} | {}/{} | s/iter: {}"
+    s = s.format( loss.item(), acc.item(), i, n_loops, avg_time)
     print(s, end="       \r")
 
 def get_data_distrs(hyps):
@@ -89,20 +91,22 @@ def get_data_distrs(hyps):
     val_bsize = 1000
     train_data, val_data = datas.get_data_split(dataset, val_p=val_p)
 
-    train_distr = torch.utils.data.DataLoader(train_data, batch_size=batch_size,
-                                            shuffle=shuffle, num_workers=n_workers)
-    val_distr = torch.utils.data.DataLoader(val_data, batch_size=val_bsize, shuffle=False,
-                                                              num_workers=n_workers)
+    train_distr = torch.utils.data.DataLoader(train_data,
+                                              batch_size=batch_size,
+                                              shuffle=shuffle,
+                                              num_workers=n_workers)
+    val_distr = torch.utils.data.DataLoader(val_data,
+                                            batch_size=val_bsize,
+                                            shuffle=False,
+                                            num_workers=n_workers)
     n_labels = train_data.n_labels
     return train_distr, val_distr, n_labels
 
 
-def train(hyps, model_hyps, verbose=False):
+def train(hyps, verbose=False):
     """
     hyps: dict
         all the hyperparameters set by the user
-    model_hyps: dict
-        the hyperparameters specific to creating the model architecture
     verbose: bool
         if true, will print status updates during training
     """
@@ -111,8 +115,8 @@ def train(hyps, model_hyps, verbose=False):
     batch_size = hyps['batch_size']
 
     if 'skip_nums' in hyps and hyps['skip_nums'] is not None and\
-                                    len(hyps['skip_nums']) > 0 and\
-                                    hyps['exp_num'] in hyps['skip_nums']:
+                              len(hyps['skip_nums']) > 0 and\
+                              hyps['exp_num'] in hyps['skip_nums']:
 
         print("Skipping", hyps['save_folder'])
         results = {"save_folder":hyps['save_folder'], 
@@ -123,15 +127,18 @@ def train(hyps, model_hyps, verbose=False):
     # Get Data and Data Distributers
     train_distr, val_distr, n_labels = get_data_distrs(hyps)
 
-    model_hyps["n_units"] = n_labels
-    model = get_model(model_hyps)
+    hyps["n_units"] = n_labels
+    model = get_model(hyps)
+    print(model)
 
-    record_session(model, hyps, model_hyps)
+    record_session(model, hyps)
+    train_log = os.path.join(hyps['save_folder'], "training_log.txt")
 
     # Make optimization objects (lossfxn, optimizer, scheduler)
     optimizer, scheduler, loss_fxn = get_optim_objs(hyps, model)
     if 'gauss_reg' in hyps and hyps['gauss_reg'] > 0:
-        gauss_reg = utils.GaussRegularizer(model, [0,6], std=hyps['gauss_reg'])
+        gauss_reg = utils.GaussRegularizer(model, [0,6],
+                                    std=hyps['gauss_reg'])
 
     # Training
     for epoch in range(hyps['n_epochs']):
@@ -140,7 +147,8 @@ def train(hyps, model_hyps, verbose=False):
         model.train(mode=True)
         epoch_loss = 0
         epoch_acc = 0
-        stats_string = 'Epoch ' + str(epoch) + " -- " + hyps['save_folder'] + "\n"
+        stats_string = 'Epoch ' + str(epoch) + " -- " +\
+                                hyps['save_folder'] + "\n"
         starttime = time.time()
 
         # Train Loop
@@ -149,10 +157,11 @@ def train(hyps, model_hyps, verbose=False):
             optimizer.zero_grad()
 
             y = y.long().to(DEVICE).squeeze()
-            preds = model(x.to(DEVICE)).squeeze()
-            loss = loss_fxn(preds, y)
-            if 'gauss_reg' in hyps and hyps['gauss_reg'] > 0:
-                loss += hyps['gauss_loss_coef']*gauss_reg.get_loss()
+            print("y:", y.shape)
+            print("x:", x.shape)
+            preds = model(x.float().to(DEVICE).contiguous()).squeeze()
+            print("preds:", preds.shape)
+            loss = loss_fxn(preds.contiguous(), y.contiguous())
             loss.backward()
             optimizer.step()
             argmaxes = torch.argmax(preds, dim=-1)
@@ -161,16 +170,19 @@ def train(hyps, model_hyps, verbose=False):
             epoch_loss += loss.item()
             epoch_acc += acc.item()
             if verbose:
-                print_train_update(loss, acc, n_loops, i, time.time()-iterstart)
-            if math.isnan(epoch_loss) or math.isinf(epoch_loss) or hyps['exp_name']=="test":
+                print_train_update(loss, acc, n_loops, i,
+                                    time.time()-iterstart)
+            if math.isnan(epoch_loss) or math.isinf(epoch_loss)\
+                                    or hyps['exp_name']=="test":
                 break
         n_loops = i+1 # Just in case miscalculated
 
         # Clean Up Train Loop
         avg_loss = epoch_loss/n_loops
         avg_acc = epoch_acc/n_loops
-        stats_string += 'Avg Loss: {} | Avg Acc: {} | Time: {}\n'.format(avg_loss, avg_acc,
-                                                                     time.time()-starttime)
+        s = 'Avg Loss: {} | Avg Acc: {} | Time: {}\n'
+        stats_string += s.format(avg_loss, avg_acc,
+                                time.time()-starttime)
         del x
         del y
 
@@ -197,8 +209,10 @@ def train(hyps, model_hyps, verbose=False):
                 val_loss += loss.item()
                 val_acc += acc.item()
                 if verbose:
-                    print_train_update(loss, acc, n_loops, i, time.time()-iterstart)
-                if math.isnan(epoch_loss) or math.isinf(epoch_loss) or hyps['exp_name']=="test":
+                    print_train_update(loss, acc, n_loops, i,
+                                        time.time()-iterstart)
+                if math.isnan(epoch_loss) or math.isinf(epoch_loss)\
+                                        or hyps['exp_name']=="test":
                     break
             print()
             n_loops = i+1 # Just in case miscalculated
@@ -206,8 +220,9 @@ def train(hyps, model_hyps, verbose=False):
             # Validation Evaluation
             val_loss = val_loss/n_loops
             val_acc = val_acc/n_loops
-            stats_string += 'Val Loss: {} | Val Acc: {} | Time: {}\n'.format(val_loss, val_acc,
-                                                                     time.time()-starttime)
+            s = 'Val Loss: {} | Val Acc: {} | Time: {}\n'
+            stats_string += s.format(val_loss, val_acc,
+                                 time.time()-starttime)
 
         if 'scheduler' in hyps and hyps['scheduler'] == "CosineAnnealingLR":
             scheduler.step()
@@ -217,7 +232,7 @@ def train(hyps, model_hyps, verbose=False):
         optimizer.zero_grad()
         save_dict = {
             "model_type": hyps['model_type'],
-            "model_hyps": model_hyps,
+            "hyps":hyps,
             "model_state_dict":model.state_dict(),
             "optim_state_dict":optimizer.state_dict(),
             "loss": avg_loss,
@@ -229,15 +244,21 @@ def train(hyps, model_hyps, verbose=False):
         for k in hyps.keys():
             if k not in save_dict:
                 save_dict[k] = hyps[k]
-        utils.save_checkpoint(save_dict, hyps['save_folder'], del_prev=True)
+        io.save_checkpoint(save_dict, hyps['save_folder'],
+                                            hyps['exp_id'],
+                                            del_prev=True)
 
         # Print Epoch Stats
         gc.collect()
         max_mem_used = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        stats_string += "Memory Used: {:.2f} mb".format(max_mem_used / 1024)+"\n"
+        stats_string += "Memory Used: {:.2f} mb".format(
+                                              max_mem_used/1024)+"\n"
         print(stats_string)
+        with open(train_log,'a') as f:
+            f.write(stats_string+"\n")
         # If loss is nan, training is futile
-        if math.isnan(avg_loss) or math.isinf(avg_loss) or hyps['exp_name']=="test":
+        if math.isnan(avg_loss) or math.isinf(avg_loss) or\
+                                            hyps['exp_name']=="test":
             break
 
     # Final save
@@ -249,22 +270,11 @@ def train(hyps, model_hyps, verbose=False):
                 "ValLoss":val_loss 
                 }
     with open(hyps['save_folder'] + "/hyperparams.txt",'a') as f:
-        s = " ".join([str(k)+":"+str(results[k]) for k in sorted(results.keys())])
+        s = " ".join([str(k)+":"+str(results[k]) for k in\
+                                        sorted(results.keys())])
         s = "\n" + s + '\n'
         f.write(s)
     return results
-
-def get_model_hyps(hyps):
-    model_hyps = {k:v for k,v in hyps.items()}
-
-    fn_args = set(hyps['model_class'].__init__.__code__.co_varnames) 
-    if "kwargs" in fn_args:
-        fn_args = fn_args | set(TDRModel.__init__.__code__.co_varnames)
-    keys = list(model_hyps.keys())
-    for k in keys:
-        if k not in fn_args:
-            del model_hyps[k]
-    return model_hyps
 
 def fill_hyper_q(hyps, hyp_ranges, keys, hyper_q, idx=0):
     """
@@ -295,11 +305,9 @@ def fill_hyper_q(hyps, hyp_ranges, keys, hyper_q, idx=0):
             hyps['save_folder'] += "_" + str(k)+str(hyps[k])
 
         hyps['model_class'] = globals()[hyps['model_type']]
-        model_hyps = get_model_hyps(hyps)
-        model_hyps['model_class'] = globals()[hyps['model_type']]
 
         # Load q
-        hyper_q.put([{k:v for k,v in hyps.items()}, {k:v for k,v in model_hyps.items()}])
+        hyper_q.put([{k:v for k,v in hyps.items()}])
         hyps['exp_num'] += 1
 
     # Non-base call. Sets a hyperparameter to a new search value and passes down the dict.

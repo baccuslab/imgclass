@@ -12,8 +12,8 @@ import time
 import numpy as np
 import torch
 import select
-from convstack.training import hyper_search
-from convstack.utils import load_json
+from imgclass.training import hyper_search
+from imgclass.utils import load_json
 
 if __name__ == "__main__":
     hyperparams_file = "hyps/hyperparams.json"
