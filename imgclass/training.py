@@ -9,6 +9,7 @@ from torch.optim.lr_scheduler import *
 import torch.nn.functional as F
 import imgclass.utils as utils
 import imgclass.datas as datas
+import imgclass.io as io
 from imgclass.models import *
 import time
 from tqdm import tqdm
@@ -111,6 +112,11 @@ def train(hyps, verbose=False):
         if true, will print status updates during training
     """
     # Initialize miscellaneous parameters 
+    hyps['seed'] = utils.try_key(hyps,'seed',None)
+    if hyps['seed'] is None:
+        hyps['seed'] = int(time.time())
+    torch.manual_seed(hyps['seed'])
+    np.random.seed(hyps['seed'])
     torch.cuda.empty_cache()
     batch_size = hyps['batch_size']
 
@@ -157,10 +163,7 @@ def train(hyps, verbose=False):
             optimizer.zero_grad()
 
             y = y.long().to(DEVICE).squeeze()
-            print("y:", y.shape)
-            print("x:", x.shape)
             preds = model(x.float().to(DEVICE).contiguous()).squeeze()
-            print("preds:", preds.shape)
             loss = loss_fxn(preds.contiguous(), y.contiguous())
             loss.backward()
             optimizer.step()
@@ -245,7 +248,7 @@ def train(hyps, verbose=False):
             if k not in save_dict:
                 save_dict[k] = hyps[k]
         io.save_checkpoint(save_dict, hyps['save_folder'],
-                                            hyps['exp_id'],
+                                            "train",
                                             del_prev=True)
 
         # Print Epoch Stats
@@ -300,15 +303,17 @@ def fill_hyper_q(hyps, hyp_ranges, keys, hyper_q, idx=0):
         if 'exp_num' not in hyps:
             if 'starting_exp_num' not in hyps: hyps['starting_exp_num'] = 0
             hyps['exp_num'] = hyps['starting_exp_num']
-        hyps['save_folder'] = hyps['exp_name'] + "/" + hyps['exp_name'] +"_"+ str(hyps['exp_num']) 
-        for k in keys:
-            hyps['save_folder'] += "_" + str(k)+str(hyps[k])
+        if "n_repeats" not in hyps: hyps['n_repeats'] = 1
+        for _ in range(hyps['n_repeats']):
+            hyps['save_folder'] = hyps['exp_name'] + "/" + hyps['exp_name'] +"_"+ str(hyps['exp_num']) 
+            for k in keys:
+                hyps['save_folder'] += "_" + str(k)+str(hyps[k])
 
-        hyps['model_class'] = globals()[hyps['model_type']]
+            hyps['model_class'] = globals()[hyps['model_type']]
 
-        # Load q
-        hyper_q.put([{k:v for k,v in hyps.items()}])
-        hyps['exp_num'] += 1
+            # Load q
+            hyper_q.put([{k:v for k,v in hyps.items()}])
+            hyps['exp_num'] += 1
 
     # Non-base call. Sets a hyperparameter to a new search value and passes down the dict.
     else:

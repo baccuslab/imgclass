@@ -121,7 +121,6 @@ class Tiny10(BaseModel):
                                             padding=self.paddings[i],
                                             stride=self.strides[i])
             self.shapes.append(shape)
-            print(shape)
         layer = [GlobalAvgPool(), nn.Linear(self.chans[-1],
                                             self.n_units)]
         self.layers.append(nn.Sequential(*layer))
@@ -130,7 +129,7 @@ class Tiny10(BaseModel):
     def forward(self, x):
         return self.layers(x)
 
-class Plain(BaseModel):
+class PlainN(BaseModel):
     def __init__(self, width=None, plain_n=10, **kwargs):
         super().__init__(**kwargs)
         if self.stackconvs:
